@@ -632,6 +632,7 @@ struct server_response {
 
 struct server_context {
     llama_model * model = nullptr;
+    std::string path_prompt_cache;
     llama_context * ctx = nullptr;
 
     gpt_params params;
@@ -1057,42 +1058,23 @@ struct server_context {
         kv_cache_clear();
         system_tokens.clear();
 
-        if (!system_prompt.empty()) {
-            system_tokens = ::llama_tokenize(ctx, system_prompt, true);
+        std::string path_session = params.path_prompt_cache;
 
-            llama_batch_clear(batch);
-
-            for (int i = 0; i < (int)system_tokens.size(); ++i) {
-                llama_batch_add(batch, system_tokens[i], i, { 0 }, false);
+        if (!path_session.empty()) {
+            system_tokens.resize(n_ctx);
+            size_t n_token_count_out = 0;
+            if (!llama_load_session_file(ctx, path_session.c_str(), system_tokens.data(), system_tokens.capacity(), &n_token_count_out)) {
+                LOG_TEE("%s: error: failed to load session file '%s'\n", __func__, path_session.c_str());
             }
-
-            const int32_t n_batch = llama_n_batch(ctx);
-
-            for (int32_t i = 0; i < batch.n_tokens; i += n_batch) {
-                const int32_t n_tokens = std::min(params.n_batch, batch.n_tokens - i);
-                llama_batch batch_view = {
-                    n_tokens,
-                    batch.token    + i,
-                    nullptr,
-                    batch.pos      + i,
-                    batch.n_seq_id + i,
-                    batch.seq_id   + i,
-                    batch.logits   + i,
-                    0, 0, 0, // unused
-                };
-
-                if (llama_decode(ctx, batch_view) != 0) {
-                    LOG_ERROR("llama_decode() failed", {});
-                    return;
-                }
-            }
-
-            // assign the system KV cache to all parallel sequences
-            for (int32_t i = 1; i <= params.n_parallel; ++i) {
-                llama_kv_cache_seq_cp(ctx, 0, i, -1, -1);
-            }
+            LOG_TEE("%s: Session file loaded '%s'\n", __func__, path_session.c_str());
+            LOG_TEE("%s: Token count out'%ld'\n", __func__, n_token_count_out);
+            system_tokens.resize(n_token_count_out);
         }
 
+        // assign the system KV cache to all parallel sequences
+        for (int32_t i = 1; i <= params.n_parallel; ++i) {
+            llama_kv_cache_seq_cp(ctx, 0, i, -1, -1);
+        
         system_need_update = false;
     }
 
@@ -2480,6 +2462,12 @@ static void server_params_parse(int argc, char ** argv, server_params & sparams,
                 break;
             }
             params.hf_file = argv[i];
+        } else if (arg == "--prompt-cache") {
+           if (++i >= argc) {
+               invalid_param = true;
+               break;
+           }   
+           params.path_prompt_cache = argv[i];
         } else if (arg == "-a" || arg == "--alias") {
             if (++i >= argc) {
                 invalid_param = true;
