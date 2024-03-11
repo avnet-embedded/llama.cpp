@@ -1051,7 +1051,7 @@ struct server_context {
     }
 
     void system_prompt_update() {
-        LOG_VERBOSE("system prompt update", {
+        LOG_VERBOSE("system prompt update 2", {
             {"system_prompt", system_prompt},
         });
 
@@ -1059,6 +1059,7 @@ struct server_context {
         system_tokens.clear();
 
         std::string path_session = params.path_prompt_cache;
+        LOG_TEE("%s: Session file loaded '%s'\n", __func__, path_session.c_str());
 
         if (!path_session.empty()) {
             system_tokens.resize(n_ctx);
@@ -1072,7 +1073,7 @@ struct server_context {
         }
 
         // assign the system KV cache to all parallel sequences
-        for (int32_t i = 1; i <= params.n_parallel; ++i) {
+        for (int32_t i = 1; i <= params.n_parallel; ++i)
             llama_kv_cache_seq_cp(ctx, 0, i, -1, -1);
         
         system_need_update = false;
